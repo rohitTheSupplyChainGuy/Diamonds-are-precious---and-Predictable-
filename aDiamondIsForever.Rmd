@@ -1,0 +1,376 @@
+---
+title: "aDiamondIsForever"
+author: "Rohit Tolawat"
+date: "6/23/2020"
+output: html_document
+---
+
+```{r loadpackages, warning=FALSE, message=FALSE}
+pacman::p_load(caret, data.table, ggplot2,gridExtra,ggpubr,MASS,ggcorrplot,qcc,cleandata,rpart,dummies,metrics,ie2misc, randomForest,ipred,grid)
+knitr::opts_chunk$set(echo = FALSE, fig.width=12, fig.height=6, fig.path = 'Figs/')
+options(digits = 3)
+```
+
+
+```{r}
+set.seed(123)
+diamondData.df <- diamonds
+diamondData.dt <- setDT(diamondData.df)
+
+trainIndex <- sample(1:nrow(diamondData.dt),0.7*nrow(diamondData.dt))
+
+diamondData.train <- diamondData.dt[trainIndex,]
+diamondData.tree.train <- diamondData.train
+
+diamondData.test <- diamondData.dt[-trainIndex,]
+diamondData.tree.test <- diamondData.test
+
+str(diamondData.train)
+
+```
+
+```{r}
+levels(diamondData.train$cut)
+levels(diamondData.train$clarity)
+levels(diamondData.train$color)
+```
+
+
+```{r}
+summary(diamondData.train)
+```
+
+
+
+```{r }
+ggplot(diamondData.train, aes(x=diamondData.train$price))+
+  geom_histogram(bins = 100)+
+  xlab("Diamond Price in $")+
+  ggtitle("Diamond prices are skewed to the right with 50% of them priced below $2400")+
+  geom_vline(aes(xintercept = median(diamondData.train$price)),linetype = "dashed", color = "blue")
+```
+
+```{r Carat v/s price plot}
+
+ggplot(diamondData.train, aes(y=diamondData.train$price, x=diamondData.train$carat))+
+  geom_point()+
+  ylab("Diamond Price in $")+
+  xlab("Carat weight, 1 carat = 200mg")+
+  ggtitle("There is a steep price rise w.r.t carat weight, but variance is high too!")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$price)))
+
+```
+
+```{r Price v/s cut boxplot}
+ggplot(diamondData.train, aes(y=diamondData.train$price, x=diamondData.train$cut))+
+  geom_boxplot()+
+  ylab("Diamond Price in $")+
+  xlab("Diamond cut type")+
+  ggtitle("Surprisingly, premium diamonds are priced more than the ideal ones!")
+
+ggplot(diamondData.train, aes(x=diamondData.train$cut))+
+  geom_bar()+
+  ylab("Number of records")+
+  xlab("Diamond cut type")+
+  ggtitle("Distribution of samples is not uniform, but sample size is good")
+
+ggplot(diamondData.train, aes(y=diamondData.train$carat, x=diamondData.train$cut))+
+  geom_boxplot()+
+  ylab("Variation in carat weight")+
+  xlab("Diamond cut type")+
+  ggtitle("Is it the carat weight that's playing games?")
+
+```
+
+```{r price v/s color}
+ggplot(diamondData.train, aes(y=diamondData.train$price, x=diamondData.train$color))+
+  geom_boxplot()+
+  ylab("Diamond Price in USD")+
+  xlab("Diamond color type")+
+  ggtitle("Contrary to our domain expertise, price tends to increase from category D to J")
+
+ggplot(diamondData.train, aes(x=diamondData.train$color))+
+  geom_bar()+
+  ylab("Number of records")+
+  xlab("Diamond color type")+
+  ggtitle("Sufficient samples of each color category")
+
+ggplot(diamondData.train, aes(y=diamondData.train$carat, x=diamondData.train$color))+
+  geom_boxplot()+
+  ylab("Variation in the carat weight")+
+  xlab("Diamond color type")+
+  ggtitle("Or is it the carat weight that is impacting the price again?")
+```
+
+```{r clarity v/s price}
+
+ggplot(diamondData.train, aes(y=diamondData.train$price, x=diamondData.train$clarity))+
+  geom_boxplot()+
+  ylab("Diamond Price in $")+
+  xlab("Diamond clarity")+
+  ggtitle("Diamond prices across the color clarity don't align with our domain knowledge")
+
+ggplot(diamondData.train, aes(x=diamondData.train$clarity))+
+  geom_bar()+
+  ylab("Number of records")+
+  xlab("Diamond clarity")+
+  ggtitle("Sample distribution isn't ideal, but ok!")
+
+ggplot(diamondData.train, aes(y=diamondData.train$carat, x=diamondData.train$clarity))+
+  geom_boxplot()+
+  ylab("Carat weight")+
+  xlab("Diamond clarity")+
+  ggtitle("Can we catch a break, please? Carat again?")
+```
+
+```{r table v/s price}
+ggplot(diamondData.train, aes(y=diamondData.train$price, x=diamondData.train$table))+
+  geom_point()+
+  ylab("Diamond Price in $")+
+  xlab("Table width")+
+  ggtitle("High variation in diamond prices across the range of table width")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$price)))
+```
+
+```{r x v/s price}
+plot1 <- ggplot(diamondData.train, aes(y=diamondData.train$price, x=diamondData.train$x))+
+  geom_point()+
+  ylab("Diamond Price in $")+
+  xlab("Length in mm")+
+  ggtitle("")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$price)))
+
+plot2 <- ggplot(diamondData.train, aes(y=diamondData.train$carat, x=diamondData.train$x))+
+  geom_point()+
+  ylab("Carat weight")+
+  xlab("Length in mm")+
+  ggtitle("")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$carat)))
+
+diamondData.train <- diamondData.train[x!=0]
+```
+
+```{r y v/s price} 
+plot3 <- ggplot(diamondData.train, aes(y=diamondData.train$price, x=diamondData.train$y))+
+  geom_point()+
+  ylab("Diamond Price in $")+
+  xlab("width in mm")+
+  ggtitle("")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$price)))
+
+plot4 <- ggplot(diamondData.train, aes(y=diamondData.train$carat, x=diamondData.train$y))+
+  geom_point()+
+  ylab("Carat weight")+
+  xlab("width in mm")+
+  ggtitle("")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$carat)))
+
+diamondData.train <- diamondData.train[y!=0]
+```
+
+```{r Price v/s z}
+plot5 <- ggplot(diamondData.train, aes(y=diamondData.train$price, x=diamondData.train$z))+
+  geom_point()+
+  ylab("Diamond Price in $")+
+  xlab("Depth in mm")+
+  ggtitle("")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$price)))
+
+plot6 <- ggplot(diamondData.train, aes(y=diamondData.train$carat, x=diamondData.train$z))+
+  geom_point()+
+  ylab("Carat weight")+
+  xlab("Depth in mm")+
+  ggtitle("")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$carat)))
+
+diamondData.train <- diamondData.train[z!=0]
+
+#grid.arrange(plot1,plot2,plot3,plot4,plot5,plot6)
+
+```
+
+```{r deoth% v/s price}
+ggplot(diamondData.train, aes(y=diamondData.train$price, x=diamondData.train$depth))+
+  geom_point()+
+  ylab("Diamond Price in $")+
+  xlab("depth in %")+
+  ggtitle("Depth exhibits high variance in diamond price, no correlation?")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$price)))
+
+ggplot(diamondData.train, aes(y=diamondData.train$carat, x=diamondData.train$depth))+
+  geom_point()+
+  ylab("Carat weight")+
+  xlab("depth in %")+
+  ggtitle("Depth does not seem to show association with carat weight as well")+
+  geom_smooth(method = "lm")+
+  coord_cartesian(ylim = c(0,max(diamondData.train$carat)))
+```
+
+```{r}
+diamondData.corr1 <-  cor(diamondData.train[,-c(2,3,4)], method = "pearson")
+ggcorrplot(diamondData.corr1, lab = TRUE)+
+  ggtitle("Pearson's correlation coefficient matrix")
+
+diamondData.corr <-  cor(diamondData.train[,-c(2,3,4)], method = "spearman")
+ggcorrplot(diamondData.corr, lab = TRUE)+
+  ggtitle("x,y,z are almost exactly colinear with each other, carat and price")
+```
+
+```{r Removing x,y,z to prevent multicollinearity}
+diamondData.train <- diamondData.train[,-c("x","y","z")]
+str(diamondData.train)
+```
+
+```{r one-hot encoding dummy variables and generating correlation coefficient matrix}
+diamondData.train <- dummy.data.frame(diamondData.train,names = c("color","cut","clarity"))
+diamond.cor2 <- round(cor(diamondData.train),1)
+ggcorrplot(diamond.cor2,lab = TRUE)+
+  ggtitle("Correlation matrix after Dummy variable substitution")
+```
+
+```{r building with all relevant variables}
+diamondData.lm <- lm(price~. - cutFair - colorJ - clarityI1, data=diamondData.train)
+summary(diamondData.lm)
+```
+```{r}
+#par(mfrow = c(2,2))
+plot(diamondData.lm)
+```
+
+```{r}
+train.control <- trainControl(method = "repeatedcv",number = 10, repeats = 4)
+
+crossValidatedModel <- train(price~. - cutFair - colorJ - clarityI1, data = diamondData.train, method = "lm",trControl = train.control)
+```
+
+
+
+```{r building the baseline model}
+diamondData.baseline.lm <- lm(price~carat, data = diamondData.train)
+summary(diamondData.baseline.lm)
+#par(mfrow = c(2,2))
+plot(diamondData.baseline.lm)
+```
+
+
+
+```{r Building a decision tree}
+diamondData.tree.train <- diamondData.tree.train[x!=0]
+diamondData.tree.train <- diamondData.tree.train[y!=0]
+diamondData.tree.train <- diamondData.tree.train[z!=0]
+diamondData.tree.train <- diamondData.tree.train[,-c("x","y","z")]
+diamondData.tree <- rpart(price~., data = diamondData.tree.train)
+rpart.plot::rpart.plot(diamondData.tree)
+```
+
+```{r}
+#Increasing the number of bootstrapped sample did not decrease the OOB error drastically, therefore using 15 trees
+ diamondData.bag.train <- bagging(price~., data = diamondData.tree.train, nbagg=15, coob=TRUE)
+```
+
+
+
+#Decision trees often accused of overfitting, lets run a Random forest to confirm our findings above
+```{r}
+diamondData.rf <- randomForest(price~.,data=diamondData.tree.train, ntree=150)
+print(diamondData.rf)
+plot(diamondData.rf)
+diamondData.rf$importance
+```
+
+```{r}
+rep.mean <- rep.int(mean(diamondData.train$price),nrow(diamondData.train))
+rep.median <- rep.int(median(diamondData.train$price),nrow(diamondData.train))
+
+mape.mean <- mape(rep.mean,diamondData.train$price)
+mape.median <- mape(rep.median,diamondData.train$price)
+
+predict.baseline <- predict(diamondData.baseline.lm,newdata = diamondData.train)
+mape.base.regression <- mape(predict.baseline,diamondData.train$price)
+
+predict.full.model <- predict(diamondData.lm,newdata = diamondData.train)
+mape.final.regression <- mape(predict.full.model,diamondData.train$price)
+
+predict.bagging.train <- predict(diamondData.bag.train,newdata = diamondData.tree.train)
+mape.bagging.train <- mape(predict.bagging.train, diamondData.train$price)
+
+predict.tree <- predict(diamondData.tree,newdata = diamondData.tree.train)
+mape.base.tree <- mape(predict.tree, diamondData.train$price)
+
+diamond.rf.predict <- predict(diamondData.rf,newdata = diamondData.tree.train)
+mape.rf <- mape(diamond.rf.predict,diamondData.tree.train$price)
+
+```
+
+```{r}
+errorVis.df <- data.frame(var1=diamond.rf.predict, var2=diamondData.tree.train$price-diamond.rf.predict)
+
+ggplot(errorVis.df,aes(x=errorVis.df$var1, y=errorVis.df$var2))+
+  geom_point()+
+  xlab("Predicted diamond price in $")+
+  ylab("Error in prediction in $")+
+  ggtitle("The variance of the residual is higher as the prices increase")+
+  geom_hline(yintercept=mean(diamondData.tree.train$price-diamond.rf.predict), linetype="dashed", color="blue", size=1)
+
+```
+
+
+```{r Applying same data transformations on test data as train}
+diamondData.test <- diamondData.test[x!=0]
+diamondData.test <- diamondData.test[y!=0]
+diamondData.test <- diamondData.test[z!=0]
+diamondData.test <- diamondData.test[,-c("x","y","z")]
+diamondData.test <- dummy.data.frame(diamondData.test,names = c("color","cut","clarity"))
+```
+
+
+```{r}
+rep.mean.test <- rep.int(mean(diamondData.test$price),nrow(diamondData.test))
+rep.median.test <- rep.int(median(diamondData.test$price),nrow(diamondData.test))
+
+mape.mean.test <- mape(rep.mean.test,diamondData.test$price)
+mape.median.test <- mape(rep.median.test,diamondData.test$price)
+
+predict.baseline.test <- predict(diamondData.baseline.lm,newdata = diamondData.test)
+mape.base.regression.test <- mape(predict.baseline.test,diamondData.test$price)
+
+predict.full.model.test <- predict(diamondData.lm,newdata = diamondData.test)
+mape.final.regression.test <- mape(predict.full.model.test,diamondData.test$price)
+
+predict.tree.test <- predict(diamondData.tree,newdata = diamondData.tree.test)
+mape.base.tree.test <- mape(predict.tree.test, diamondData.tree.test$price)
+
+predict.bagging.test <- predict(diamondData.bag.train,newdata = diamondData.tree.test)
+mape.bagging.test <- mape(predict.bagging.test, diamondData.tree.test$price)
+
+diamond.rf.predict.test <- predict(diamondData.rf,newdata = diamondData.tree.test)
+mape.rf.test <- mape(diamond.rf.predict.test,diamondData.tree.test$price)
+
+```
+
+
+
+```{r}
+result.dt <- data.table(var1=c("Baseline Mean", "Baseline Median", "Regression-Carat","Multiple Linear","Decision Tree","Bagged model","Random Forest"), var2 = c(mape.mean,mape.median,mape.base.regression,mape.final.regression,mape.base.tree,mape.bagging.train,mape.rf), var3=c(mape.mean.test,mape.median.test,mape.base.regression.test,mape.final.regression.test,mape.base.tree.test,mape.bagging.test,mape.rf.test))
+
+names(result.dt) <- c("ModelType", "MAPE Train", "MAPE Test")
+result.dt.melt <- melt(result.dt,id = c("ModelType"))
+
+result.dt.melt$ModelType <- factor(result.dt.melt$ModelType, levels = c("Baseline Mean", "Baseline Median", "Regression-Carat","Multiple Linear","Decision Tree","Bagged model","Random Forest"))
+ggplot(result.dt.melt,aes(x=ModelType, y=value, group=variable, color=variable))+
+  geom_line()+
+  geom_point(size=2)+
+  xlab("Model type")+
+  ylab("Mean Absolute Percentage Error")+
+  ggtitle("The models performs consistently across the training and test data")
+```
+
